@@ -188,8 +188,7 @@ class Controller(object):
 
     def _open_device(self, connection_types=[SmartCardConnection, FidoConnection, OtpConnection]):
         if self._reader_filter:
-            dev = self._get_dev_from_reader()
-            if dev:
+            if dev := self._get_dev_from_reader():
                 return dev.open_connection(connection_types[0])
             else:
                 raise ValueError('no_device_custom_reader')
@@ -197,8 +196,7 @@ class Controller(object):
 
     def _open_oath(self):
         if self._reader_filter:
-            dev = self._get_dev_from_reader()
-            if dev:
+            if dev := self._get_dev_from_reader():
                 return dev.open_connection(SmartCardConnection)
             else:
                 raise ValueError('no_device_custom_reader')
@@ -224,8 +222,7 @@ class Controller(object):
                     self._readers.append(dev)
             except:
                 pass
-        readers_changed = len(self._readers) != len(old_readers)
-        return readers_changed
+        return len(self._readers) != len(old_readers)
 
     def check_readers(self, filter):
         return success({
@@ -234,16 +231,10 @@ class Controller(object):
 
     def _get_dev_from_reader(self):
         readers = list_ccid(self._reader_filter)
-        if len(readers) == 1:
-            dev = readers[0]
-            return dev
-        return None
+        return readers[0] if len(readers) == 1 else None
 
     def _get_devices(self, otp_mode=False):
-        res = []
-        for dev, info in list_all_devices():
-            res.append(self._serialise_dev(dev, info))
-        return res
+        return [self._serialise_dev(dev, info) for dev, info in list_all_devices()]
 
     def _get_fido_status(self):
         fido_has_pin = False
@@ -350,57 +341,55 @@ class Controller(object):
 
         if not otp_mode and reader_filter:
             self._reader_filter = reader_filter
-            dev = self._get_dev_from_reader()
-            if dev:
-                with dev.open_connection(SmartCardConnection) as conn:
-                    info = read_info(dev.pid, conn)
-                    try:
-                        oath = OathSession(conn)
-                        has_password = oath.locked
-                        selectable = True
-                        self._current_serial = info.serial
-                    except Exception:
-                        selectable = False
-                        has_password = False
-
-                interfaces_enabled = interfaces_from_capabilities(
-                        info.config.enabled_capabilities[TRANSPORT.USB])
-                interfaces_supported = interfaces_from_capabilities(
-                        info.supported_capabilities[TRANSPORT.USB])
-
-                ctap_available, fido_pin_list = self._get_fido_status()
-
-                self._devices.append({
-                    'name': get_name(info, dev.pid.get_type() if dev.pid else None),
-                    'version': '.'.join(str(d) for d in info.version),
-                    'serial': info.serial or '',
-                    'usbInterfacesEnabled': interfaces_enabled,
-                    'usbInterfacesSupported': interfaces_supported,
-                    'usbAppEnabled': [
-                        a.name for a in CAPABILITY
-                        if a in info.config.enabled_capabilities.get(TRANSPORT.USB)],
-                    'usbAppSupported': [
-                        a.name for a in CAPABILITY
-                        if a in info.supported_capabilities.get(TRANSPORT.USB)],
-                    'nfcAppEnabled': [
-                        a.name for a in CAPABILITY
-                        if a in info.config.enabled_capabilities.get(TRANSPORT.NFC, [])],
-                    'nfcAppSupported': [
-                        a.name for a in CAPABILITY
-                        if a in info.supported_capabilities.get(TRANSPORT.NFC, [])],
-                    'hasPassword': has_password,
-                    'ctapAvailable': ctap_available,
-                    'formFactor': info.form_factor,
-                    'fidoHasPin': fido_pin_list[0],
-                    'fidoPinRetries': fido_pin_list[1],
-                    'isNfc': self._reader_filter and not self._reader_filter.lower().startswith("yubico yubikey"),
-                    'selectable': selectable,
-                    'validated': True  # not has_password
-                })
-
-                return success({'devices': self._devices})
-            else:
+            if not (dev := self._get_dev_from_reader()):
                 return success({'devices': []})
+            with dev.open_connection(SmartCardConnection) as conn:
+                info = read_info(dev.pid, conn)
+                try:
+                    oath = OathSession(conn)
+                    has_password = oath.locked
+                    selectable = True
+                    self._current_serial = info.serial
+                except Exception:
+                    selectable = False
+                    has_password = False
+
+            interfaces_enabled = interfaces_from_capabilities(
+                    info.config.enabled_capabilities[TRANSPORT.USB])
+            interfaces_supported = interfaces_from_capabilities(
+                    info.supported_capabilities[TRANSPORT.USB])
+
+            ctap_available, fido_pin_list = self._get_fido_status()
+
+            self._devices.append({
+                'name': get_name(info, dev.pid.get_type() if dev.pid else None),
+                'version': '.'.join(str(d) for d in info.version),
+                'serial': info.serial or '',
+                'usbInterfacesEnabled': interfaces_enabled,
+                'usbInterfacesSupported': interfaces_supported,
+                'usbAppEnabled': [
+                    a.name for a in CAPABILITY
+                    if a in info.config.enabled_capabilities.get(TRANSPORT.USB)],
+                'usbAppSupported': [
+                    a.name for a in CAPABILITY
+                    if a in info.supported_capabilities.get(TRANSPORT.USB)],
+                'nfcAppEnabled': [
+                    a.name for a in CAPABILITY
+                    if a in info.config.enabled_capabilities.get(TRANSPORT.NFC, [])],
+                'nfcAppSupported': [
+                    a.name for a in CAPABILITY
+                    if a in info.supported_capabilities.get(TRANSPORT.NFC, [])],
+                'hasPassword': has_password,
+                'ctapAvailable': ctap_available,
+                'formFactor': info.form_factor,
+                'fidoHasPin': fido_pin_list[0],
+                'fidoPinRetries': fido_pin_list[1],
+                'isNfc': self._reader_filter and not self._reader_filter.lower().startswith("yubico yubikey"),
+                'selectable': selectable,
+                'validated': True  # not has_password
+            })
+
+            return success({'devices': self._devices})
 
     def load_devices_usb(self, otp_mode=False):
         self._reader_filter = None
@@ -412,12 +401,15 @@ class Controller(object):
             return success({'devices': []})
 
         self._devices = self._get_devices(otp_mode)
-        win_fido = False
         no_access = sum(self._devs.values()) > len(self._devices)
-        if no_access:
-            if self._win_non_admin and \
-                    any(pid.get_interfaces() == USB_INTERFACE.FIDO for pid in self._devs.keys()):
-                win_fido = True
+        win_fido = bool(
+            no_access
+            and self._win_non_admin
+            and any(
+                pid.get_interfaces() == USB_INTERFACE.FIDO
+                for pid in self._devs.keys()
+            )
+        )
 
         # If no current serial, or current serial seems removed,
         # select the first serial found.
@@ -711,9 +703,13 @@ class Controller(object):
                 if upload:
                     try:
                         upload_url = prepare_upload_key(
-                            key, public_id, private_id,
+                            key,
+                            public_id,
+                            private_id,
                             serial=self._current_serial,
-                            user_agent='ykman-qt/' + app_version)
+                            user_agent=f'ykman-qt/{app_version}',
+                        )
+
                     except PrepareUploadFailed as e:
                         logger.debug('YubiCloud upload failed', exc_info=e)
                         return failure('upload_failed',
@@ -733,9 +729,13 @@ class Controller(object):
                 if upload:
                     try:
                         upload_url = prepare_upload_key(
-                            key, public_id, private_id,
+                            key,
+                            public_id,
+                            private_id,
                             serial=self._current_serial,
-                            user_agent='ykman-qt/' + app_version)
+                            user_agent=f'ykman-qt/{app_version}',
+                        )
+
                     except PrepareUploadFailed as e:
                         logger.debug('YubiCloud upload failed', exc_info=e)
                         return failure('upload_failed',
@@ -936,8 +936,10 @@ class Controller(object):
                 client_pin.set_pin(new_pin)
                 return success()
         except CtapError as e:
-            if e.code == CtapError.ERR.INVALID_LENGTH or \
-                    e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+            if e.code in [
+                CtapError.ERR.INVALID_LENGTH,
+                CtapError.ERR.PIN_POLICY_VIOLATION,
+            ]:
                 return failure('too long')
             raise
 
@@ -951,8 +953,10 @@ class Controller(object):
                 client_pin.change_pin(current_pin, new_pin)
                 return success()
         except CtapError as e:
-            if e.code == CtapError.ERR.INVALID_LENGTH or \
-                    e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+            if e.code in [
+                CtapError.ERR.INVALID_LENGTH,
+                CtapError.ERR.PIN_POLICY_VIOLATION,
+            ]:
                 return failure('too long')
             if e.code == CtapError.ERR.PIN_INVALID:
                 return failure('wrong pin')
@@ -983,8 +987,10 @@ class Controller(object):
                         })
                 return success({'credentials': credentials})
         except CtapError as e:
-            if e.code == CtapError.ERR.INVALID_LENGTH or \
-                    e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+            if e.code in [
+                CtapError.ERR.INVALID_LENGTH,
+                CtapError.ERR.PIN_POLICY_VIOLATION,
+            ]:
                 return failure('too long')
             if e.code == CtapError.ERR.PIN_INVALID:
                 return failure('wrong pin')
@@ -1024,8 +1030,10 @@ class Controller(object):
                             return success()
                 return failure()
         except CtapError as e:
-            if e.code == CtapError.ERR.INVALID_LENGTH or \
-                    e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+            if e.code in [
+                CtapError.ERR.INVALID_LENGTH,
+                CtapError.ERR.PIN_POLICY_VIOLATION,
+            ]:
                 return failure('too long')
             if e.code == CtapError.ERR.PIN_INVALID:
                 return failure('wrong pin')
@@ -1043,16 +1051,17 @@ class Controller(object):
                 bio = client_pin.get_pin_token(pin, ClientPin.PERMISSION.BIO_ENROLL)
                 self._pin = pin
                 bio = FPBioEnrollment(ctap2, client_pin.protocol, bio)
-                fingerprints = []
-                for t_id, name in bio.enumerate_enrollments().items():
-                    fingerprints.append({
-                        'id': t_id.hex(),
-                        'name': name
-                    })
+                fingerprints = [
+                    {'id': t_id.hex(), 'name': name}
+                    for t_id, name in bio.enumerate_enrollments().items()
+                ]
+
                 return success({'fingerprints': fingerprints})
         except CtapError as e:
-            if e.code == CtapError.ERR.INVALID_LENGTH or \
-                    e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+            if e.code in [
+                CtapError.ERR.INVALID_LENGTH,
+                CtapError.ERR.PIN_POLICY_VIOLATION,
+            ]:
                 return failure('too long')
             if e.code == CtapError.ERR.PIN_INVALID:
                 return failure('wrong pin')
@@ -1133,7 +1142,7 @@ class Controller(object):
                 if key not in enrollments:
                     # Match using template_id as NAME
                     matches = [k for k in enrollments if enrollments[k] == template_id]
-                    if len(matches) == 0:
+                    if not matches:
                         logger.debug(f"No fingerprint matching ID={template_id}")
                     elif len(matches) > 1:
                         logger.debug(

@@ -21,7 +21,7 @@ def build_qrc(resources):
             dirs.sort()
             files.sort()
             for f in files:
-                yield '<file>{}</file>'.format(os.path.join(root, f))
+                yield f'<file>{os.path.join(root, f)}</file>'
     yield '</qresource>'
     yield '</RCC>'
 
